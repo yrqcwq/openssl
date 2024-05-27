@@ -49,7 +49,22 @@ void generate_aes_key(unsigned char *key, unsigned char *iv)
     close(urandom_fd);
 }
 
+void send_aes_iv(char * data){
+     // 打开要写入的文件
+    FILE *file = fopen("aes_iv.txt", "w+");
+    if (!file) {
+        perror("Error opening file for writing");
+        exit(EXIT_FAILURE);
+    }
 
+    // 写入数据到文件
+    fwrite(data,1,AES_BLOCK_SIZE,file);
+
+    // 关闭文件
+    fclose(file);
+
+
+}
 
 int main()
 {
@@ -110,17 +125,15 @@ int main()
     if (EVP_PKEY_encrypt(ctx, encrypted_key, &encrypted_key_len, aes_key, AES_KEY_LENGTH / 8) <= 0)
         handleErrors();
     EVP_PKEY_CTX_free(ctx);
-
+ 
     // Send encrypted AES key to server
     if (write(client_socket, encrypted_key, encrypted_key_len) < 0)
     {
         perror("Error sending encrypted key to server");
         exit(EXIT_FAILURE);
     }
-    if (write(client_socket, aes_iv, AES_BLOCK_SIZE) != AES_BLOCK_SIZE) {
-        perror("Error sending IV");
-        exit(EXIT_FAILURE);
-    }
+    //Sen AES IV
+    send_aes_iv(aes_iv);
     // Encrypt message using AES
     EVP_CIPHER_CTX *aes_ctx = EVP_CIPHER_CTX_new();
     if (!aes_ctx || EVP_EncryptInit_ex(aes_ctx, EVP_aes_256_cbc(), NULL, aes_key, aes_iv) <= 0)

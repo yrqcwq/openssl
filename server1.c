@@ -24,9 +24,9 @@ void handleErrors(void)
     exit(EXIT_FAILURE);
 }*/
 int server_socket = -1;
-void handleErrors(void)
+void handleErrors(char * ErrorInformation)
 {
-    fprintf(stderr, "Error occurred\n");
+    fprintf(stderr, "Error occurred:%s\n",ErrorInformation);
     exit(EXIT_FAILURE);
 }
 void cleanup(int signum)
@@ -34,6 +34,7 @@ void cleanup(int signum)
     if (server_socket != -1)
     {
         close(server_socket);
+        EVP_cleanup();
         printf("Server socket closed\n");
     }
     exit(EXIT_SUCCESS);
@@ -70,7 +71,36 @@ void generate_aes_key(unsigned char *key, unsigned char *iv)
     close(urandom_fd);
 }
 
+void receive_aes_iv(char * data){
+     // 打开要读取的文件
+    FILE *file = fopen("aes_iv.txt", "r+");
+    if (!file) {
+        perror("Error opening file for reading");
+        exit(EXIT_FAILURE);
+    }
 
+    // 读取文件内容
+
+    size_t bytes_read = fread(data, 1, AES_BLOCK_SIZE, file);
+    if (bytes_read == 0) {
+        printf("211180129\n");
+        perror("Error reading file");
+        exit(EXIT_FAILURE);
+    }
+
+
+
+    // 关闭文件
+    fclose(file);
+    if (truncate("aes_iv.txt", 0) != 0) {
+        perror("Error truncating file");
+        exit(EXIT_FAILURE);
+    }
+
+
+
+
+}
 
 
 
@@ -82,7 +112,6 @@ int main()
     unsigned char plaintext[BUFFER_SIZE];
     unsigned char ciphertext[BUFFER_SIZE + AES_BLOCK_SIZE];
     unsigned char aes_key[AES_KEY_LENGTH / 8];
-    unsigned char aes_iv[AES_BLOCK_SIZE];
     EVP_PKEY *rsa_key = NULL;
 
      // Set up signal handling
@@ -95,9 +124,9 @@ int main()
     // Generating RSA key pair
     EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
     if (!ctx || EVP_PKEY_keygen_init(ctx) <= 0 || EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, RSA_KEY_LENGTH) <= 0)
-        handleErrors();
+        handleErrors("GeneratingRSA1");
     if (EVP_PKEY_keygen(ctx, &rsa_key) <= 0)
-        handleErrors();
+        handleErrors("GeneratingRSA2");
     EVP_PKEY_CTX_free(ctx);
 
     // Creating socket
@@ -126,7 +155,8 @@ int main()
 
     // Accepting connections in a loop
     while (1)
-    {
+    {      
+        unsigned char aes_iv[AES_BLOCK_SIZE]={'\0'};
         // Accepting connections
         client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
 
@@ -138,7 +168,7 @@ int main()
         // Sending public key to client
         EVP_PKEY *public_key = EVP_PKEY_dup(rsa_key);
         if (!public_key)
-            handleErrors();
+            handleErrors("SendingPublicKey");
 
         BIO *bio_out = BIO_new(BIO_s_mem());
         PEM_write_bio_PUBKEY(bio_out, public_key);
@@ -160,22 +190,20 @@ int main()
         unsigned char decrypted_key[AES_KEY_LENGTH / 8];
         EVP_PKEY_CTX *decrypt_ctx = EVP_PKEY_CTX_new(rsa_key, NULL);
         if (!decrypt_ctx || EVP_PKEY_decrypt_init(decrypt_ctx) <= 0)
-            handleErrors();
+            handleErrors("DecryptingAES1");
         
 
         size_t decrypted_key_len = AES_KEY_LENGTH / 8;
         if (EVP_PKEY_decrypt(decrypt_ctx, NULL, &decrypted_key_len, ciphertext, encrypted_key_len) <= 0)
             {   
-                handleErrors();} 
+                handleErrors("DecryptingAES2");} 
         if (EVP_PKEY_decrypt(decrypt_ctx, decrypted_key, &decrypted_key_len, ciphertext, encrypted_key_len) <= 0)
             {   
-                handleErrors();}       
+                handleErrors("DecryptingAES3");}       
 
         EVP_PKEY_CTX_free(decrypt_ctx);
-        if (read(client_socket, aes_iv, AES_BLOCK_SIZE) != AES_BLOCK_SIZE) {
-            perror("Error receiving IV from client");
-            exit(EXIT_FAILURE);
-        }
+        //Receiving ase_iv
+
         // Receiving encrypted message from client
         size_t ciphertext_len = read(client_socket, ciphertext, BUFFER_SIZE + AES_BLOCK_SIZE);
         if (ciphertext_len < 0)
@@ -185,16 +213,17 @@ int main()
         }
         // Decrypting message using AES
         EVP_CIPHER_CTX *aes_ctx = EVP_CIPHER_CTX_new();
+        receive_aes_iv(aes_iv);
         if (!aes_ctx || EVP_DecryptInit_ex(aes_ctx, EVP_aes_256_cbc(), NULL, decrypted_key, aes_iv) <= 0)
-            handleErrors();
+            handleErrors("DecryptingMessage1");
         int len;
 
         if (EVP_DecryptUpdate(aes_ctx, plaintext, &len, ciphertext, ciphertext_len) <= 0)
-            handleErrors();
+            handleErrors("DecryptingMessage2");
 
         int plaintext_len = len;
         if (EVP_DecryptFinal_ex(aes_ctx, plaintext + len, &len) <= 0)
-            handleErrors();
+            handleErrors("DecryptingMessage3");
         plaintext_len += len;
 
         EVP_CIPHER_CTX_free(aes_ctx);
